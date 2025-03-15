@@ -166,7 +166,9 @@ class SSMKernel(nn.Module):
             state = state.unsqueeze(2)  # (batch_size, state_dim, 1)
             
             # Apply SSM equation: x_t = A_d x_{t-1} + B_d u_t
-            u_t = u[:, t].unsqueeze(2)  # (batch_size, hidden_dim, 1)
+            # Multiply: B_d now has shape (batch_size, state_dim, hidden_dim)
+            # u_t is unsqueezed to (batch_size, hidden_dim, 1) so the product gives (batch_size, state_dim, 1)
+            u_t = u[:, t].unsqueeze(2)
             state = torch.bmm(A_d, state) + torch.bmm(B_d, u_t)
             
             # Apply output equation: y_t = C_t x_t + D_t u_t
@@ -271,7 +273,10 @@ class ParallelSSMKernel(SSMKernel):
         # Compute Cx term
         Cx = torch.matmul(C, x_reshaped).squeeze(3)  # (batch_size, seq_len, 1)
         
-        # Compute Du term
+        # In ParallelSSMKernel.forward, right before computing Du:
+        D = D.unsqueeze(2)  # Now D has shape (batch_size, seq_len, 1, hidden_dim)
+
+        # Then compute Du as before:
         Du = torch.matmul(D, u_reshaped).squeeze(3)  # (batch_size, seq_len, 1)
         
         # Compute output: y = Cx + Du

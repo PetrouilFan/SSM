@@ -9,7 +9,8 @@ State Space Models (SSMs) are a class of sequence models that represent sequence
 1. **Sparse SSMs**: Utilizing sparsity in parameter matrices to reduce computational cost and memory footprint
 2. **Selective Parameterization**: Dynamically adjusting the model's parameters based on the input
 3. **HiPPO Initialization**: Leveraging the Higher-order Polynomial Projection Operator for initializing state matrices
-4. **GPU Optimization**: Employing techniques for efficient execution on resource-constrained GPUs
+4. **GPU Optimization**: Employing techniques for efficient execution on resource-constrained GPUs.
+   *Note: Further optimization is required to fix and improve GPU memory usage.*
 
 ## Project Structure
 
@@ -93,4 +94,4 @@ python -m src.dataset.synthetic_data --num_samples 1000 --output_path data/synth
 
 ## License
 
-[MIT License](LICENSE)
+[Non Commercial License](LICENSE)

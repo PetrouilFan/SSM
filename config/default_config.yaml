@@ -8,11 +8,11 @@ seed: 42
 
 # Model configuration
 model:
-  vocab_size: 50000  # This will be overridden by the actual tokenizer vocabulary size
+  vocab_size: 1960  # This will be overridden by the actual tokenizer vocabulary size
   hidden_dim: 768
   state_dim: 128
-  ffn_dim: 2048
-  num_layers: 12
+  ffn_dim: 1024
+  num_layers: 6
   max_seq_len: 1024
   dropout: 0.1
   activation: "gelu"
@@ -40,19 +40,19 @@ tokenizer:
 # Dataset configuration
 dataset:
   type: "synthetic"  # "wikitext103", "pile", "synthetic", or "custom"
-  max_seq_len: 1024
+  max_seq_len: 512
   stride: 512
   max_examples: null
   data_dir: "data"
   data_path: "data/synthetic/phi4_dataset.json"  # Used for synthetic dataset
   text_key: "text"
-  batch_size: 16
+  batch_size: 4
   val_split: 0.1
   test_split: 0.1
 
 # Dataloader configuration
 dataloader:
-  batch_size: 16
+  batch_size: 4
   num_workers: 4
   shuffle: true
 

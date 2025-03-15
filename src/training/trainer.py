@@ -193,8 +193,10 @@ class SSMTrainer:
                 
                 # Forward pass with optional mixed precision
                 if self.mixed_precision != 'no':
-                    with torch.cuda.amp.autocast(dtype=torch.float16 if self.mixed_precision == 'fp16' else torch.bfloat16):
-                        outputs = self.model(**batch)
+                    with torch.amp.autocast('cuda', dtype=torch.float16 if self.mixed_precision == 'fp16' else torch.bfloat16):
+                        input_ids = batch['input_ids']
+                        attention_mask = batch.get('attention_mask')
+                        outputs = self.model(input_ids=input_ids, attention_mask=attention_mask)
                         logits = outputs['logits'] if isinstance(outputs, dict) else outputs
                         
                         # Compute loss
@@ -275,56 +277,56 @@ class SSMTrainer:
                         lr = self.scheduler.get_last_lr()[0]
                         self.writer.add_scalar('lr', lr, self.global_step)
                         self.writer.add_scalar('loss', loss.item() * gradient_accumulation_steps, self.global_step)
-                        
+
                         if isinstance(loss_dict, dict) and 'hard_loss' in loss_dict and 'soft_loss' in loss_dict:
                             self.writer.add_scalar('hard_loss', loss_dict['hard_loss'].item(), self.global_step)
                             self.writer.add_scalar('soft_loss', loss_dict['soft_loss'].item(), self.global_step)
-                        
+
                         self.logger.info(
                             f"Step: {self.global_step}, Loss: {loss.item() * gradient_accumulation_steps:.4f}, "
                             f"LR: {lr:.8f}, Time: {(time.time() - start_time) / 60:.2f}m"
                         )
-                    
+
                     # Save checkpoint
                     if self.global_step % save_steps == 0:
                         self.save_checkpoint(os.path.join(self.output_dir, 'checkpoints', f'step_{self.global_step}'))
-                    
+
                     # Evaluate
                     if self.eval_dataloader is not None and self.global_step % eval_steps == 0:
                         eval_results = self.evaluate()
                         self.model.train()  # Set model back to training mode
-                        
+
                         # Log evaluation results
                         self.writer.add_scalar('eval_loss', eval_results['loss'], self.global_step)
                         self.writer.add_scalar('eval_perplexity', eval_results['perplexity'], self.global_step)
-                        
+
                         # Save best model
                         if eval_results['loss'] < self.best_eval_loss:
                             self.best_eval_loss = eval_results['loss']
                             self.save_checkpoint(os.path.join(self.output_dir, 'checkpoints', 'best'))
                             self.logger.info(f"New best model saved with eval loss: {self.best_eval_loss:.4f}")
-            
+
             # End of epoch
             epoch_time = time.time() - epoch_start_time
             self.logger.info(f"Epoch {epoch + 1}/{num_epochs} completed in {epoch_time / 60:.2f}m")
-            
+
             # Save checkpoint at the end of each epoch
             self.save_checkpoint(os.path.join(self.output_dir, 'checkpoints', f'epoch_{epoch + 1}'))
-        
+
         # End of training
         total_time = time.time() - start_time
         self.logger.info(f"Training completed in {total_time / 60:.2f}m")
-        
+
         # Final evaluation
         if self.eval_dataloader is not None:
             eval_results = self.evaluate()
             self.logger.info(f"Final evaluation results: {eval_results}")
-        
+
         # Save final model
         self.save_checkpoint(os.path.join(self.output_dir, 'checkpoints', 'final'))
-        
+
         return self.model
-    
+
     def evaluate(self) -> Dict[str, float]:
         """
         Evaluate the model on the evaluation dataset.

@@ -157,11 +157,11 @@ class DenseSelectiveParameterization(SelectiveParameterization):
         # B matrix: state_dim x 1
         self.B_proj = nn.Linear(self.param_proj_dim, state_dim, bias=use_bias)
         
-        # C matrix: 1 x state_dim
-        self.C_proj = nn.Linear(self.param_proj_dim, state_dim, bias=use_bias)
+        # C matrix: hidden_dim x state_dim
+        self.C_proj = nn.Linear(self.param_proj_dim, hidden_dim * state_dim, bias=use_bias)
         
-        # D scalar: direct input-output connection
-        self.D_proj = nn.Linear(self.param_proj_dim, 1, bias=use_bias)
+        # D matrix: hidden_dim x hidden_dim
+        self.D_proj = nn.Linear(self.param_proj_dim, hidden_dim * hidden_dim, bias=use_bias)
         
         # Initialize parameter projections
         self._init_parameters(param_init_method)
@@ -214,9 +214,9 @@ class DenseSelectiveParameterization(SelectiveParameterization):
         Returns:
             Dictionary containing generated parameters:
                 - A: shape (batch_size, seq_len, state_dim, state_dim)
-                - B: shape (batch_size, seq_len, state_dim, 1)
-                - C: shape (batch_size, seq_len, 1, state_dim)
-                - D: shape (batch_size, seq_len, 1, 1)
+                - B: shape (batch_size, seq_len, state_dim, hidden_dim)
+                - C: shape (batch_size, seq_len, hidden_dim, state_dim)
+                - D: shape (batch_size, seq_len, hidden_dim, hidden_dim)
         """
         batch_size, seq_len, _ = x.shape
         
@@ -225,9 +225,9 @@ class DenseSelectiveParameterization(SelectiveParameterization):
         
         # Generate SSM parameters
         A = self.A_proj(h).view(batch_size, seq_len, self.state_dim, self.state_dim)
-        B = self.B_proj(h).view(batch_size, seq_len, self.state_dim, 1)
-        C = self.C_proj(h).view(batch_size, seq_len, 1, self.state_dim)
-        D = self.D_proj(h).view(batch_size, seq_len, 1, 1)
+        B = self.B_proj(h).view(batch_size, seq_len, self.state_dim, self.hidden_dim)
+        C = self.C_proj(h).view(batch_size, seq_len, self.hidden_dim, self.state_dim)
+        D = self.D_proj(h).view(batch_size, seq_len, self.hidden_dim, self.hidden_dim)
         
         return {'A': A, 'B': B, 'C': C, 'D': D}
 
@@ -301,13 +301,13 @@ class SparseSelectiveParameterization(SelectiveParameterization):
         self.A_proj = nn.Linear(self.param_proj_dim, A_nnz, bias=use_bias)
         
         # B matrix: state_dim x 1
-        self.B_proj = nn.Linear(self.param_proj_dim, state_dim, bias=use_bias)
+        self.B_proj = nn.Linear(self.param_proj_dim, state_dim * hidden_dim, bias=use_bias)
         
-        # C matrix: 1 x state_dim
-        self.C_proj = nn.Linear(self.param_proj_dim, state_dim, bias=use_bias)
+        # C matrix: hidden_dim x state_dim
+        self.C_proj = nn.Linear(self.param_proj_dim, hidden_dim * state_dim, bias=use_bias)
         
-        # D scalar: direct input-output connection
-        self.D_proj = nn.Linear(self.param_proj_dim, 1, bias=use_bias)
+        # D matrix: hidden_dim x hidden_dim
+        self.D_proj = nn.Linear(self.param_proj_dim, hidden_dim * hidden_dim, bias=use_bias)
         
         # Initialize parameters
         self._init_parameters(sparse_init_method)
@@ -458,44 +458,50 @@ class SparseSelectiveParameterization(SelectiveParameterization):
     
     def forward(self, x: torch.Tensor) -> Dict[str, torch.Tensor]:
         """
-        Generate sparse SSM parameters based on input.
-        
+        Generate sparse SSM parameters based on input (optimized version).
+
         Args:
             x: Input tensor, shape (batch_size, seq_len, input_dim)
-            
+
         Returns:
             Dictionary containing generated parameters:
                 - A: shape (batch_size, seq_len, state_dim, state_dim)
-                - B: shape (batch_size, seq_len, state_dim, 1)
-                - C: shape (batch_size, seq_len, 1, state_dim)
-                - D: shape (batch_size, seq_len, 1, 1)
+                - B: shape (batch_size, seq_len, state_dim, hidden_dim)
+                - C: shape (batch_size, seq_len, hidden_dim, state_dim)
+                - D: shape (batch_size, seq_len, hidden_dim, hidden_dim)
         """
         batch_size, seq_len, _ = x.shape
-        
+
         # Project input to hidden representation
         h = self.input_proj(x)  # (batch_size, seq_len, hidden_dim)
-        
+
         # Generate non-zero elements for A
         A_nonzero = self.A_proj(h)  # (batch_size, seq_len, A_nnz)
-        
+
         # Convert to sparse A matrix using the mask
-        A = torch.zeros(batch_size, seq_len, self.state_dim, self.state_dim, 
-                       device=x.device)
-        
+        A = torch.zeros(batch_size, seq_len, self.state_dim, self.state_dim,
+                       device=x.device, dtype=x.dtype)
+
         # Get indices of non-zero elements in mask
         nonzero_idx = torch.nonzero(self._A_mask)
-        
-        # Convert 1D A_nonzero values to sparse 2D A matrix
-        for b in range(batch_size):
-            for s in range(seq_len):
-                for i, (row, col) in enumerate(nonzero_idx):
-                    A[b, s, row, col] = A_nonzero[b, s, i]
-        
+        A_nnz = nonzero_idx.size(0)
+
+        # Create batch and sequence index tensors
+        batch_idx = torch.arange(batch_size, device=x.device).view(-1, 1, 1).expand(-1, seq_len, A_nnz).flatten()
+        seq_idx = torch.arange(seq_len, device=x.device).view(1, -1, 1).expand(batch_size, -1, A_nnz).flatten()
+        row_idx = nonzero_idx[:, 0].view(1, 1, -1).expand(batch_size, seq_len, -1).flatten()
+        col_idx = nonzero_idx[:, 1].view(1, 1, -1).expand(batch_size, seq_len, -1).flatten()
+
+        # Use index_put_ for efficient sparse assignment
+        indices = torch.stack([batch_idx, seq_idx, row_idx, col_idx], dim=0)
+        A.index_put_((indices[0], indices[1], indices[2], indices[3]), A_nonzero.flatten())
+
+
         # Generate B, C, and D normally
-        B = self.B_proj(h).view(batch_size, seq_len, self.state_dim, 1)
-        C = self.C_proj(h).view(batch_size, seq_len, 1, self.state_dim)
-        D = self.D_proj(h).view(batch_size, seq_len, 1, 1)
-        
+        B = self.B_proj(h).view(batch_size, seq_len, self.state_dim, self.hidden_dim)
+        C = self.C_proj(h).view(batch_size, seq_len, self.hidden_dim, self.state_dim)
+        D = self.D_proj(h).view(batch_size, seq_len, self.hidden_dim, self.hidden_dim)
+
         return {'A': A, 'B': B, 'C': C, 'D': D}
 
 
@@ -556,13 +562,13 @@ class LowRankSelectiveParameterization(SelectiveParameterization):
         self.A_diag_proj = nn.Linear(self.param_proj_dim, state_dim, bias=use_bias)
         
         # B matrix: state_dim x 1
-        self.B_proj = nn.Linear(self.param_proj_dim, state_dim, bias=use_bias)
+        self.B_proj = nn.Linear(self.param_proj_dim, state_dim * hidden_dim, bias=use_bias)
         
-        # C matrix: 1 x state_dim
-        self.C_proj = nn.Linear(self.param_proj_dim, state_dim, bias=use_bias)
+        # C matrix: hidden_dim x state_dim
+        self.C_proj = nn.Linear(self.param_proj_dim, hidden_dim * state_dim, bias=use_bias)
         
-        # D scalar: direct input-output connection
-        self.D_proj = nn.Linear(self.param_proj_dim, 1, bias=use_bias)
+        # D matrix: hidden_dim x hidden_dim
+        self.D_proj = nn.Linear(self.param_proj_dim, hidden_dim * hidden_dim, bias=use_bias)
         
         # Initialize parameters
         self._init_parameters()
@@ -586,9 +592,9 @@ class LowRankSelectiveParameterization(SelectiveParameterization):
         Returns:
             Dictionary containing generated parameters:
                 - A: shape (batch_size, seq_len, state_dim, state_dim)
-                - B: shape (batch_size, seq_len, state_dim, 1)
-                - C: shape (batch_size, seq_len, 1, state_dim)
-                - D: shape (batch_size, seq_len, 1, 1)
+                - B: shape (batch_size, seq_len, state_dim, hidden_dim)
+                - C: shape (batch_size, seq_len, hidden_dim, state_dim)
+                - D: shape (batch_size, seq_len, hidden_dim, hidden_dim)
         """
         batch_size, seq_len, _ = x.shape
         
@@ -611,8 +617,8 @@ class LowRankSelectiveParameterization(SelectiveParameterization):
         A[batch_indices, seq_indices, diag_indices, diag_indices] += A_diag
         
         # Generate B, C, and D normally
-        B = self.B_proj(h).view(batch_size, seq_len, self.state_dim, 1)
-        C = self.C_proj(h).view(batch_size, seq_len, 1, self.state_dim)
-        D = self.D_proj(h).view(batch_size, seq_len, 1, 1)
+        B = self.B_proj(h).view(batch_size, seq_len, self.state_dim, self.hidden_dim)
+        C = self.C_proj(h).view(batch_size, seq_len, self.hidden_dim, self.state_dim)
+        D = self.D_proj(h).view(batch_size, seq_len, self.hidden_dim, self.hidden_dim)
         
         return {'A': A, 'B': B, 'C': C, 'D': D}
