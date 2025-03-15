@@ -1,0 +1,109 @@
+# Default configuration for Sparse SSM model
+
+# Output directory
+output_dir: "outputs/sparse_ssm"
+
+# Random seed for reproducibility
+seed: 42
+
+# Model configuration
+model:
+  vocab_size: 50000  # This will be overridden by the actual tokenizer vocabulary size
+  hidden_dim: 768
+  state_dim: 128
+  ffn_dim: 2048
+  num_layers: 12
+  max_seq_len: 1024
+  dropout: 0.1
+  activation: "gelu"
+  layer_norm_eps: 1.0e-5
+  selective_param_class: "sparse"  # "dense", "sparse", or "low_rank"
+  sparsity_level: 0.9
+  use_parallel_scan: true
+  tie_embedding_weights: true
+  pad_token_id: 0
+
+# Tokenizer configuration
+tokenizer:
+  vocab_size: 50000
+  pad_token: "[PAD]"
+  unk_token: "[UNK]"
+  bos_token: "[BOS]"
+  eos_token: "[EOS]"
+  train:
+    enabled: true
+    files: ["data/synthetic/phi4_dataset.json"]
+    vocab_size: 50000
+    min_freq: 1
+    sample_size: 100000
+
+# Dataset configuration
+dataset:
+  type: "synthetic"  # "wikitext103", "pile", "synthetic", or "custom"
+  max_seq_len: 1024
+  stride: 512
+  max_examples: null
+  data_dir: "data"
+  data_path: "data/synthetic/phi4_dataset.json"  # Used for synthetic dataset
+  text_key: "text"
+  batch_size: 16
+  val_split: 0.1
+  test_split: 0.1
+
+# Dataloader configuration
+dataloader:
+  batch_size: 16
+  num_workers: 4
+  shuffle: true
+
+# Optimizer configuration
+optimizer:
+  name: "adamw"
+  learning_rate: 5.0e-4
+  weight_decay: 0.01
+  beta1: 0.9
+  beta2: 0.999
+  eps: 1.0e-8
+  use_param_groups: true
+  selective_param_lr_multiplier: 1.5
+
+# Scheduler configuration
+scheduler:
+  name: "cosine"
+  warmup_steps: 1000
+  min_lr_ratio: 0.1
+  warmup_init_lr_ratio: 0.1  # Changed from 0.0 to 0.1 to ensure it's a positive value
+
+# Training configuration
+training:
+  num_epochs: 3
+  gradient_accumulation_steps: 2
+  max_grad_norm: 1.0
+  logging_steps: 100
+  save_steps: 1000
+  eval_steps: 1000
+  mixed_precision: "fp16"  # "no", "fp16", or "bf16"
+  gradient_checkpointing: true
+  ignore_index: -100
+  label_smoothing: 0.1
+
+# Generation configuration
+generation:
+  max_length: 10
+  temperature: 0.7
+  top_k: 50
+  top_p: 0.9
+
+# Synthetic data generation configuration
+synthetic:
+  num_samples: 10
+  temperature: 0.7
+  max_tokens: 512
+  batch_size: 1
+  output_dir: "data/synthetic"
+  output_file: "phi4_dataset.json"
+  
+  # Ollama configuration
+  ollama:
+    base_url: "http://10.0.3.1:11434"
+    model_name: "gemma3:1b"

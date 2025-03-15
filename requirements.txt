@@ -1,0 +1,12 @@
+torch>=2.0.0
+numpy>=1.24.0
+tqdm>=4.66.0
+pyyaml>=6.0.0
+matplotlib>=3.7.0
+einops>=0.6.0
+scipy>=1.10.0
+requests>=2.28.0
+transformers>=4.30.0
+datasets>=2.14.0
+tensorboard>=2.14.0
+pytest>=7.4.0
